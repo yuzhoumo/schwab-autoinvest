@@ -146,7 +146,7 @@ async def main():
     parser.add_argument("config", nargs="?", default="config.json", help="Path to config file")
     parser.add_argument("--force-dry-run", action="store_true", help="Force dry run mode regardless of config setting")
     args = parser.parse_args()
-    
+
     with open(args.config, 'r') as cf:
         config = json.load(cf)
 
@@ -175,7 +175,7 @@ async def main():
     dry_run = config['dry_run'] or args.force_dry_run
     if args.force_dry_run:
         logging.info("Force dry run mode enabled via command line flag")
-    
+
     await place_limit_orders(
         client, config['account_hash'], config['allocation'], dry_run
     )
