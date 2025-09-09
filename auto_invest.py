@@ -17,22 +17,31 @@ def calculate_optimal_allocation(cash: float, prices: dict[str, float], allocati
 
     while remaining_cash > 0:
         best_symbol = None
-        best_improvement = 0
+        best_score = float('-inf')
 
         for symbol in allocation.keys():
-            if prices[symbol] > remaining_cash:
+            if prices[symbol] > remaining_cash or prices[symbol] <= 0:
                 continue
 
             current_value = shares[symbol] * prices[symbol]
-            current_deviation = abs(current_value - target_amounts[symbol])
-            new_deviation = abs(current_value + prices[symbol] - target_amounts[symbol])
-            improvement = current_deviation - new_deviation
+            new_value = current_value + prices[symbol]
 
-            if improvement > best_improvement:
-                best_improvement = improvement
+            # Calculate how much this purchase reduces the relative deviation
+            if target_amounts[symbol] > 0:
+                current_deviation = abs(current_value - target_amounts[symbol]) / target_amounts[symbol]
+                new_deviation = abs(new_value - target_amounts[symbol]) / target_amounts[symbol]
+            else:
+                current_deviation = new_deviation = 0
+
+            # Score is the relative improvement per dollar spent
+            improvement = current_deviation - new_deviation
+            score = improvement / prices[symbol] if prices[symbol] > 0 else 0
+
+            if score > best_score:
+                best_score = score
                 best_symbol = symbol
 
-        if best_symbol is None:
+        if best_symbol is None or best_score <= 0:
             break
 
         shares[best_symbol] += 1
@@ -89,7 +98,8 @@ async def place_limit_orders(client: AsyncClient, account_hash: str, allocation:
         order_tasks.append(client.place_order(account_hash, order))
 
     responses = await asyncio.gather(*order_tasks)
-    for symbol, resp in zip(shares_to_buy.keys(), responses):
+    order_symbols = [symbol for symbol, quantity in shares_to_buy.items() if quantity > 0]
+    for symbol, resp in zip(order_symbols, responses):
         if resp.status_code >= 400:
             logging.error(f"Failed to place order for {symbol}: {resp.status_code}")
         else:
