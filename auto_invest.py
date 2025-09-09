@@ -7,7 +7,6 @@ from schwab.auth import easy_client
 from schwab.client import AsyncClient
 from schwab.orders.equities import equity_buy_limit, Duration, Session
 
-
 def calculate_optimal_allocation(cash: float, prices: dict[str, float], allocation: dict[str, int]) -> dict[str, int]:
     total_weight = sum(allocation.values())
     target_amounts = {symbol: cash * (weight / total_weight) for symbol, weight in allocation.items()}
@@ -71,6 +70,32 @@ async def get_current_prices(client: AsyncClient, symbols: list[str]) -> dict[st
     return prices
 
 
+async def check_existing_orders(client: AsyncClient, account_hash: str) -> bool:
+    open_statuses = [
+        AsyncClient.Order.Status.AWAITING_PARENT_ORDER,
+        AsyncClient.Order.Status.AWAITING_CONDITION,
+        AsyncClient.Order.Status.AWAITING_MANUAL_REVIEW,
+        AsyncClient.Order.Status.ACCEPTED,
+        AsyncClient.Order.Status.AWAITING_UR_OUT,
+        AsyncClient.Order.Status.PENDING_ACTIVATION,
+        AsyncClient.Order.Status.QUEUED,
+        AsyncClient.Order.Status.WORKING,
+        AsyncClient.Order.Status.PENDING_CANCEL,
+        AsyncClient.Order.Status.PENDING_REPLACE,
+    ]
+
+    tasks = [client.get_orders_for_account(account_hash, status=s) for s in open_statuses]
+    responses = await asyncio.gather(*tasks)
+
+    for response in responses:
+        if response.json():
+            logging.warning("Found existing open orders - cancelling script")
+            return True
+
+    logging.info("No existing open orders found")
+    return False
+
+
 async def place_limit_orders(client: AsyncClient, account_hash: str, allocation: dict[str, int], dry_run: bool = True):
     symbols = list(allocation.keys())
     cash, prices = await asyncio.gather(
@@ -127,6 +152,10 @@ async def main():
 
     logging.info("Starting automated investment process")
     client = cast(AsyncClient, easy_client(api_key, app_secret, callback_url, token_path, asyncio=True))
+
+    if await check_existing_orders(client, config['account_hash']):
+        logging.error("Script cancelled due to existing open orders")
+        return
 
     await place_limit_orders(
         client, config['account_hash'], config['allocation'], config['dry_run']
