@@ -1,7 +1,7 @@
 [project]
-name = "schwab"
+name = "schwab-autoinvest"
 version = "0.1.0"
-description = "Add your description here"
+description = "Auto-invest available funds based on pre-configured target allocation"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
