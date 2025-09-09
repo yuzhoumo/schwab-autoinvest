@@ -1,0 +1,9 @@
+.DS_Store
+.venv/
+
+# log
+*.log
+
+# secrets
+config.json
+schwab_tokens.json

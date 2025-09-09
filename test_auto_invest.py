@@ -587,7 +587,8 @@ class TestPlaceLimitOrders:
 class TestMainFunction:
     """Test the main orchestration function."""
 
-    def test_config_file_loading(self):
+    @pytest.mark.asyncio
+    async def test_config_file_loading(self):
         """Test configuration file loading."""
         test_config = {
             "schwab_client": {
@@ -605,11 +606,12 @@ class TestMainFunction:
 
         with patch('builtins.open', mock_open(read_data=json.dumps(test_config))), \
              patch('auto_invest.easy_client'), \
-             patch('auto_invest.place_limit_orders') as mock_place_orders:
+             patch('auto_invest.place_limit_orders') as mock_place_orders, \
+             patch('auto_invest.check_existing_orders', return_value=False):
 
             # Mock sys.argv to provide config file
             with patch.object(sys, 'argv', ['auto_invest.py', 'test_config.json']):
-                asyncio.run(main())
+                await main()
 
             mock_place_orders.assert_called_once()
 
@@ -642,7 +644,8 @@ class TestMainFunction:
             with pytest.raises(KeyError):
                 asyncio.run(main())
 
-    def test_default_config_file(self):
+    @pytest.mark.asyncio
+    async def test_default_config_file(self):
         """Test using default config.json when no file specified."""
         test_config = {
             "schwab_client": {
@@ -659,9 +662,10 @@ class TestMainFunction:
         with patch('builtins.open', mock_open(read_data=json.dumps(test_config))), \
              patch('auto_invest.easy_client'), \
              patch('auto_invest.place_limit_orders') as mock_place_orders, \
+             patch('auto_invest.check_existing_orders', return_value=False), \
              patch.object(sys, 'argv', ['auto_invest.py']):  # No config file specified
 
-            asyncio.run(main())
+            await main()
 
             # Should still work with default config.json
             mock_place_orders.assert_called_once()
