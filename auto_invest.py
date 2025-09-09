@@ -7,6 +7,7 @@ from schwab.auth import easy_client
 from schwab.client import AsyncClient
 from schwab.orders.equities import equity_buy_limit, Duration, Session
 
+
 def calculate_optimal_allocation(cash: float, prices: dict[str, float], allocation: dict[str, int]) -> dict[str, int]:
     total_weight = sum(allocation.values())
     target_amounts = {symbol: cash * (weight / total_weight) for symbol, weight in allocation.items()}
@@ -46,7 +47,15 @@ def calculate_optimal_allocation(cash: float, prices: dict[str, float], allocati
         shares[best_symbol] += 1
         remaining_cash -= prices[best_symbol]
 
-    logging.info(f"Optimal allocation: {shares}")
+    # Log target vs actual allocation
+    total_invested = cash - remaining_cash
+    logging.info("Target vs Actual allocation:")
+    for symbol in shares.keys():
+        target_pct = (allocation[symbol] / total_weight) * 100
+        actual_value = shares[symbol] * prices[symbol]
+        actual_pct = (actual_value / total_invested) * 100 if total_invested > 0 else 0
+        logging.info(f"  {symbol}: {target_pct:.1f}% target, {actual_pct:.1f}% actual")
+
     logging.info(f"Remaining cash: ${remaining_cash:.2f}")
 
     return shares
@@ -153,6 +162,7 @@ async def main():
     logging.info("Starting automated investment process")
     client = cast(AsyncClient, easy_client(api_key, app_secret, callback_url, token_path, asyncio=True))
 
+    logging.info("Check for existing open orders")
     if await check_existing_orders(client, config['account_hash']):
         logging.error("Script cancelled due to existing open orders")
         return
@@ -160,6 +170,8 @@ async def main():
     await place_limit_orders(
         client, config['account_hash'], config['allocation'], config['dry_run']
     )
+
+    logging.info("Ending automated investment process")
 
 
 if __name__ == "__main__":
