@@ -2,11 +2,48 @@ import argparse
 import asyncio
 import json
 import logging
-import sys
+import smtplib
+import datetime
+from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import cast
 from schwab.auth import easy_client
 from schwab.client import AsyncClient
 from schwab.orders.equities import equity_buy_limit, Duration, Session
+
+
+def send_log_email(config: dict, log_file_path: str):
+    email_config = config.get('email', {})
+    if not email_config.get('enabled', False):
+        return
+
+    try:
+        with open(log_file_path, 'r') as f:
+            log_content = f.read()
+
+        msg = MIMEMultipart()
+        msg['From'] = email_config['from_email']
+        msg['To'] = email_config['to_email']
+
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
+        subject = email_config['subject'].format(timestamp=timestamp)
+        msg['Subject'] = subject
+
+        body = f"Auto-invest script completed at {timestamp}\n\nLog contents:\n\n{log_content}"
+        msg.attach(MIMEText(body, 'plain'))
+
+        server = smtplib.SMTP(email_config['smtp_server'], email_config['smtp_port'])
+        server.starttls()
+        server.login(email_config['username'], email_config['password'])
+
+        text = msg.as_string()
+        server.sendmail(email_config['from_email'], email_config['to_email'], text)
+        server.quit()
+
+        logging.info("Log email sent successfully")
+    except Exception as e:
+        logging.error(f"Failed to send email: {e}")
 
 
 def calculate_optimal_allocation(cash: float, prices: dict[str, float], allocation: dict[str, int]) -> dict[str, int]:
@@ -150,8 +187,9 @@ async def main():
     with open(args.config, 'r') as cf:
         config = json.load(cf)
 
+    ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')
     log_level = config.get('log_level', 'INFO')
-    log_file  = config.get('log_file', 'auto_invest.log')
+    log_file  = config.get('log_file', '{timestamp}_autoinvest.log').format(timestamp=ts)
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -164,7 +202,7 @@ async def main():
     callback_url  = client_config['callback_url']
     token_path    = client_config['token_path']
 
-    logging.info("Starting automated investment process")
+    logging.info("Start automated investment process")
     client = cast(AsyncClient, easy_client(api_key, app_secret, callback_url, token_path, asyncio=True))
 
     logging.info("Check for existing open orders")
@@ -180,7 +218,8 @@ async def main():
         client, config['account_hash'], config['allocation'], dry_run
     )
 
-    logging.info("Ending automated investment process")
+    send_log_email(config, log_file)
+    logging.info("End automated investment process")
 
 
 if __name__ == "__main__":

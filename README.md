@@ -35,7 +35,18 @@ Define your keys and target allocation in `config.json`:
     },
     "dry_run": true,
     "log_level": "INFO",
-    "log_file": "auto_invest.log"
+    "log_file": "auto_invest.log",
+    "log_file": "{timestamp}_autoinvest.log",
+    "email": {
+        "enabled": true,
+        "smtp_server": "smtp.protonmail.ch",
+        "smtp_port": 587,
+        "username": "YOUR_FROM_EMAIL@YOUR_DOMAIN.com",
+        "password": "YOUR_PASSWORD",
+        "from_email": "YOUR_FROM_EMAIL@YOUR_DOMAIN.com",
+        "to_email": "YOUR_TO_EMAIL@YOUR_DOMAIN.com",
+        "subject": "Schwab Autoinvest Log - {timestamp}"
+    }
 }
 ```
 
