@@ -126,7 +126,7 @@ async def place_limit_orders(client: AsyncClient, account_hash: str, allocation:
             logging.info("DRY RUN: Order not actually placed")
             continue
 
-        order = equity_buy_limit(symbol, quantity, price)
+        order = equity_buy_limit(symbol, quantity, f"{price:.2f}")
         order.set_duration(Duration.DAY)
         order.set_session(Session.NORMAL)
         order_tasks.append(client.place_order(account_hash, order))

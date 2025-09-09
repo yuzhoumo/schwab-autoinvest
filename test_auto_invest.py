@@ -558,7 +558,15 @@ class TestPlaceLimitOrders:
     async def test_account_cash_fetch_failure(self):
         """Test failure when fetching account cash."""
         mock_client = AsyncMock()
-        mock_client.get_account.side_effect = Exception("Account access denied")
+        mock_client.get_account = AsyncMock(side_effect=Exception("Account access denied"))
+        
+        # Configure get_quotes to return a proper response even though it won't be used
+        mock_quotes_response = Mock()
+        mock_quotes_response.json.return_value = {
+            'VTI': {'quote': {'lastPrice': 100.0}},
+            'VXUS': {'quote': {'lastPrice': 50.0}}
+        }
+        mock_client.get_quotes.return_value = mock_quotes_response
 
         allocation = {'VTI': 50, 'VXUS': 50}
 

@@ -485,7 +485,7 @@ wheels = [
 ]
 
 [[package]]
-name = "schwab"
+name = "schwab-autoinvest"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
