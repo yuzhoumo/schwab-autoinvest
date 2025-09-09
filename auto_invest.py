@@ -6,245 +6,132 @@ import schwab
 
 class AutoInvestor:
     def __init__(self, config_file: str = "config.json"):
-        self.config = self._load_config(config_file)
         self.client = None
-        self._setup_logging()
 
-    def _load_config(self, config_file: str) -> dict:
-        """Load configuration from JSON file"""
-        try:
-            with open(config_file, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            logging.error(f"Config file {config_file} not found")
-            sys.exit(1)
-        except json.JSONDecodeError:
-            logging.error(f"Invalid JSON in {config_file}")
-            sys.exit(1)
+        with open(config_file, 'r') as cf:
+            self.config = json.load(cf)
 
-    def _setup_logging(self):
-        """Configure logging"""
         log_level = self.config.get('log_level', 'INFO')
-        log_file = self.config.get('log_file', 'auto_invest.log')
+        log_file  = self.config.get('log_file', 'auto_invest.log')
 
         logging.basicConfig(
             level=getattr(logging, log_level.upper()),
             format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=[logging.FileHandler(log_file), logging.StreamHandler()]
         )
 
     def authenticate(self):
-        """Authenticate with Schwab API"""
-        try:
-            api_key = self.config['schwab']['api_key']
-            app_secret = self.config['schwab']['app_secret']
-            token_path = self.config['schwab']['token_path']
-            callback_url = self.config['schwab']['callback_url']
-
-            self.client = schwab.auth.easy_client(
-                api_key=api_key,
-                app_secret=app_secret,
-                callback_url=callback_url,
-                token_path=token_path,
-            )
-            logging.info("Successfully authenticated with Schwab API")
-
-        except Exception as e:
-            logging.error(f"Authentication failed: {e}")
-            sys.exit(1)
+        schwab_config = self.config['schwab_client']
+        self.client = schwab.auth.easy_client(**schwab_config)
+        logging.info("Successfully authenticated with Schwab API")
 
     def get_account_balance(self) -> float:
-        """Get available cash balance from primary account"""
-        if not self.client:
-            msg = 'Cannot get account balance before authentication'
-            logging.error(msg)
-            raise RuntimeError(msg)
-
-        try:
-            account_hash = self.config['schwab']['account_hash']
-            account_info = self.client.get_account(account_hash)
-
-            balances = account_info.json()['securitiesAccount']['currentBalances']
-            available_funds = balances.get('cashBalance', 0)
-
-            logging.info(f"Available funds: ${available_funds:,.2f}")
-            return float(available_funds)
-
-        except Exception as e:
-            logging.error(f"Error getting account balance: {e}")
-            return 0.0
+        assert self.client is not None, "Client not authenticated"
+        account_info = self.client.get_account(self.config['account_hash'])
+        balance = account_info.json()['securitiesAccount']['currentBalances']['cashBalance']
+        logging.info(f"Available funds: ${balance:,.2f}")
+        return float(balance)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
-        """Get current market prices for given symbols"""
-        if not self.client:
-            msg = 'Cannot get current prices before authentication'
-            logging.error(msg)
-            raise RuntimeError(msg)
+        assert self.client is not None, "Client not authenticated"
 
-        try:
-            quotes = self.client.get_quotes(symbols)
-            prices = {}
+        quotes = self.client.get_quotes(symbols).json()
+        prices = {}
 
-            for symbol in symbols:
-                quote_data = quotes.json()[symbol]['quote']
-                # Use last price, fallback to bid/ask midpoint
-                last_price = quote_data.get('lastPrice')
-                if last_price:
-                    prices[symbol] = float(last_price)
-                else:
-                    bid = quote_data.get('bidPrice', 0)
-                    ask = quote_data.get('askPrice', 0)
-                    if bid and ask:
-                        prices[symbol] = (float(bid) + float(ask)) / 2
-                    else:
-                        logging.warning(f"No price data available for {symbol}")
-                        prices[symbol] = 0.0
+        for symbol in symbols:
+            quote = quotes[symbol]['quote']
+            price = quote.get('lastPrice') or (quote.get('bidPrice', 0) + quote.get('askPrice', 0)) / 2
+            prices[symbol] = float(price) if price else 0.0
 
-            logging.info(f"Current prices: {prices}")
-            return prices
-
-        except Exception as e:
-            logging.error(f"Error getting current prices: {e}")
-            return {}
+        logging.info(f"Current prices: {prices}")
+        return prices
 
     def calculate_allocation(self, available_funds: float, prices: dict[str, float]) -> list[tuple[str, int, float]]:
-        """
-        Calculate optimal share allocation based on target percentages
-        Returns list of (symbol, shares, dollar_amount) tuples
-        """
-        allocations = self.config['allocation']
-        min_investment = self.config.get('min_investment_amount', 100)
-
-        if available_funds < min_investment:
-            logging.info(f"Available funds ${available_funds:,.2f} below minimum ${min_investment:,.2f}")
-            return []
-
         orders = []
-        total_allocated = 0.0
+        for symbol, target_pct in self.config['allocation'].items():
+            price = prices.get(symbol, 0)
+            if price <= 0: continue
 
-        # Calculate target dollar amounts
-        for symbol, target_pct in allocations.items():
-            if symbol not in prices or prices[symbol] <= 0:
-                logging.warning(f"Skipping {symbol} - no valid price")
-                continue
-
-            target_amount = available_funds * (target_pct / 100)
-            shares = int(target_amount / prices[symbol])  # Whole shares only
-            actual_amount = shares * prices[symbol]
-
+            shares = int(available_funds * target_pct / 100 / price)
             if shares > 0:
-                orders.append((symbol, shares, actual_amount))
-                total_allocated += actual_amount
-                logging.info(f"{symbol}: {shares} shares @ ${prices[symbol]:.2f} = ${actual_amount:.2f}")
+                amount = shares * price
+                orders.append((symbol, shares, amount))
+                logging.info(f"{symbol}: {shares} shares @ ${price:.2f} = ${amount:.2f}")
 
-        logging.info(f"Total allocation: ${total_allocated:.2f} of ${available_funds:.2f}")
         return orders
 
     def place_limit_orders(self, orders: list[tuple[str, int, float]]) -> bool:
-        """Place limit orders for calculated allocations"""
-        if not self.client:
-            msg = 'Cannot get place limit orders before authentication'
-            logging.error(msg)
-            raise RuntimeError(msg)
+        assert self.client is not None, "Client not authenticated"
 
         if not orders:
             logging.info("No orders to place")
             return True
 
         dry_run = self.config.get('dry_run', True)
-        account_hash = self.config['schwab']['account_hash']
+        account_hash = self.config['account_hash']
 
         if dry_run:
             logging.info("DRY RUN MODE - No actual orders will be placed")
+            return self._execute_dry_run_orders(orders)
+        else:
+            return self._execute_live_orders(orders, account_hash)
 
-        all_successful = True
+    def _execute_dry_run_orders(self, orders: list[tuple[str, int, float]]) -> bool:
+        for symbol, shares, _ in orders:
+            price = self.get_current_prices([symbol])[symbol]
+            logging.info(f"DRY RUN: Would place order for {shares} shares of {symbol} at ${price:.2f}")
+        return True
+
+    def _execute_live_orders(self, orders: list[tuple[str, int, float]], account_hash: str) -> bool:
+        assert self.client is not None, "Client not authenticated"
 
         for symbol, shares, _ in orders:
-            try:
-                # Get current price for limit order
-                current_prices = self.get_current_prices([symbol])
-                if symbol not in current_prices:
-                    logging.error(f"Cannot get current price for {symbol}")
-                    all_successful = False
-                    continue
+            price = self.get_current_prices([symbol])[symbol]
 
-                limit_price = current_prices[symbol]
+            order = {
+                "orderType": "LIMIT",
+                "session": "NORMAL",
+                "duration": "DAY",
+                "orderStrategyType": "SINGLE",
+                "price": f"{price:.2f}",
+                "orderLegCollection": [{
+                    "instruction": "BUY",
+                    "quantity": shares,
+                    "instrument": {"symbol": symbol, "assetType": "ETF"}
+                }]
+            }
 
-                order = {
-                    "orderType": "LIMIT",
-                    "session": "NORMAL",
-                    "duration": "DAY",
-                    "orderStrategyType": "SINGLE",
-                    "price": f"{limit_price:.2f}",
-                    "orderLegCollection": [{
-                        "instruction": "BUY",
-                        "quantity": shares,
-                        "instrument": {
-                            "symbol": symbol,
-                            "assetType": "ETF"
-                        }
-                    }]
-                }
+            response = self.client.place_order(account_hash, order)
+            if response.status_code != 201:
+                logging.error(f"Failed to place order for {symbol}: {response.text}")
+                return False
+            logging.info(f"Successfully placed order for {shares} shares of {symbol}")
 
-                if dry_run:
-                    logging.info(f"DRY RUN: Would place order for {shares} shares of {symbol} at ${limit_price:.2f}")
-                else:
-                    response = self.client.place_order(account_hash, order)
-                    if response.status_code == 201:
-                        logging.info(f"Successfully placed order for {shares} shares of {symbol}")
-                    else:
-                        logging.error(f"Failed to place order for {symbol}: {response.text}")
-                        all_successful = False
-
-            except Exception as e:
-                logging.error(f"Error placing order for {symbol}: {e}")
-                all_successful = False
-
-        return all_successful
+        return True
 
     def run(self):
-        """Main execution method"""
         logging.info("Starting automated investment process")
 
-        try:
-            # Authenticate
-            self.authenticate()
+        self.authenticate()
+        available_funds = self.get_account_balance()
 
-            # Get available balance
-            available_funds = self.get_account_balance()
-            if available_funds <= 0:
-                logging.info("No funds available for investment")
-                return
+        if available_funds <= 0:
+            logging.info("No funds available for investment")
+            return
 
-            # Get current prices
-            symbols = list(self.config['allocation'].keys())
-            prices = self.get_current_prices(symbols)
+        symbols = list(self.config['allocation'].keys())
+        prices = self.get_current_prices(symbols)
+        orders = self.calculate_allocation(available_funds, prices)
 
-            # Calculate allocation
-            orders = self.calculate_allocation(available_funds, prices)
-
-            # Place orders
-            success = self.place_limit_orders(orders)
-
-            if success:
-                logging.info("Investment process completed successfully")
-            else:
-                logging.error("Some orders failed - check logs for details")
-
-        except Exception as e:
-            logging.error(f"Unexpected error in investment process: {e}")
-            raise
+        if self.place_limit_orders(orders):
+            logging.info("Investment process completed successfully")
+        else:
+            logging.error("Some orders failed - check logs for details")
 
 
 def main():
-    """Main entry point"""
     config_file = sys.argv[1] if len(sys.argv) > 1 else "config.json"
-
-    investor = AutoInvestor(config_file)
-    investor.run()
+    AutoInvestor(config_file).run()
 
 
 if __name__ == "__main__":
