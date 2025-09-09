@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import json
 import logging
@@ -141,8 +142,12 @@ async def place_limit_orders(client: AsyncClient, account_hash: str, allocation:
 
 
 async def main():
-    config_file = sys.argv[1] if len(sys.argv) > 1 else "config.json"
-    with open(config_file, 'r') as cf:
+    parser = argparse.ArgumentParser(description="Automated investment script")
+    parser.add_argument("config", nargs="?", default="config.json", help="Path to config file")
+    parser.add_argument("--force-dry-run", action="store_true", help="Force dry run mode regardless of config setting")
+    args = parser.parse_args()
+    
+    with open(args.config, 'r') as cf:
         config = json.load(cf)
 
     log_level = config.get('log_level', 'INFO')
@@ -167,8 +172,12 @@ async def main():
         logging.error("Script cancelled due to existing open orders")
         return
 
+    dry_run = config['dry_run'] or args.force_dry_run
+    if args.force_dry_run:
+        logging.info("Force dry run mode enabled via command line flag")
+    
     await place_limit_orders(
-        client, config['account_hash'], config['allocation'], config['dry_run']
+        client, config['account_hash'], config['allocation'], dry_run
     )
 
     logging.info("Ending automated investment process")

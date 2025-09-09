@@ -625,7 +625,8 @@ class TestMainFunction:
 
     def test_missing_config_file(self):
         """Test behavior when config file is missing."""
-        with patch('builtins.open', side_effect=FileNotFoundError("Config not found")):
+        with patch('builtins.open', side_effect=FileNotFoundError("Config not found")), \
+             patch.object(sys, 'argv', ['auto_invest.py', 'missing_config.json']):
             with pytest.raises(FileNotFoundError):
                 asyncio.run(main())
 
